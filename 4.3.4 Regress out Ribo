@@ -1,0 +1,67 @@
+library(Seurat)
+library(clustree)
+library(EnhancedVolcano)
+library(ggplot2)
+
+set.seed(1)
+
+#loadsamples-------
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("   ")
+
+#Generate Seurat Object----
+SGData <- CreateSeuratObject(srat.data, project = "SrcGFP_1")
+
+#Label mito and rRNA----
+SGData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+SGData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+#Subset filter----
+
+SGData <- subset(SGData, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+
+#Regress out ribo and mito when normalisaing----
+SGData <- SCTransform(SGData, vars.to.regress = c("percent.mt", "percent.ribo"))
+
+#Dimentionality reduciton----
+SGData <- RunPCA(SGData)
+
+#Dimention check
+pct <- SGData[["pca"]]@stdev / sum(SGData[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+SGData <- RunUMAP(SGData, dims = 1:44)
+SGData <- FindNeighbors(SGData, dims = 1:44)
+SGData <- FindClusters(SGData, resolution = 0.1)
+DimPlot(SGData)
+
+totalcells_cluster0 <- WhichCells(SGData, idents = "0")
+
+#DimPlot(SGData) Generates UMAP plot Fig 4.10A!----
+#totalcells_cluster0 provides cell number in cluster 0, 3718!----
+
+FilteredSrcGFP1_markers <- FindAllMarkers(SGData)
+
+FilteredSrcGFP1_markers_cluster0 <- subset(FilteredSrcGFP1_markers, cluster == "0")
+SrcGFP1_markers_positive <- subset(FilteredSrcGFP1_markers_cluster0, avg_log2FC > 0)
+SrcGFP1_markers_negative <- subset(FilteredSrcGFP1_markers_cluster0, avg_log2FC < 0)
+
+#Generates number of marker genes, positive and negative for comparison to previous none vars to regress (see GitHub 4.3.3 Seurat Reveals Unspecified Cluster)---
+
+write.csv(SrcGFP1_markers_positive, "/Volumes/Macintosh HD/Users/anna/Desktop/ThesisTables/SeuratUnspecified.csv")
+
+#Generates table of postive genes to be compared to list in 4.3.3 Seurat Reveals Unspecified Cluster----------------
