@@ -1,0 +1,50 @@
+library("DropletUtils")
+library("dplyr")
+library("ggplot2")
+
+set.seed(1)
+
+
+#Upload raw data: Between "" place the location of SrcGFP_1 rawoutputs i.e folder containing barcodes/features/matrix
+sce <- read10xCounts("    ")
+sce
+
+#Parition the counts of individual genes from the meta.data
+my.counts <- counts(sce)
+
+#Parition barcodes, rank them by the number of total UMI for each barcode, rank them in decending order of barcode with highest UMI count. Rank 1 = barcode with the highest UMI count
+br.out <- barcodeRanks(my.counts)
+
+#Plot this as a kneeplot ranking with rank on x-axis and total UMI count on y-axis
+plot(br.out$rank, br.out$total, log="xy", xlab="Rank", ylab="Total")
+
+#Save the order of barcodes by rank
+o <- order(br.out$rank)
+
+#Add additional information on knee-plot including inflection and knee points, addtional red line added at inflection point value (by me)
+plot(br.out$rank, br.out$total, log="xy", xlab="Rank", ylab="Total")
+lines(br.out$rank[o], br.out$fitted[o], col="red")
+abline(h=665, col="dodgerblue", lty = 2)
+abline(h=349, col="forestgreen", lty = 2)
+abline(v=66718, col="red")
+legend("bottomleft", lty=2, col=c("dodgerblue", "forestgreen"),
+       legend=c("knee", "inflection"))
+       
+# Figure 4.3 DropletsUtils knee plot genetated! -----------------------------
+       
+
+#Estimate the number of empty drops in sample
+e.out <- emptyDrops(my.counts)
+e.out
+
+
+#Parameters to determine that empty droplets have a false detection rate of above 0.01, anything below this value is considered a droplet containing a cell
+is.cell <- e.out$FDR <= 0.01
+
+#Sanity check
+summary(e.out$FDR)
+
+#Sum of how many barcodes are considered true cells (THIS is the value of interest and this value has been inputted to "abline(v=202, col="red")" as v= in above code.
+sum(is.cell, na.rm=TRUE)
+
+# Total number of estimated cells generated, 66,681! -----------------------------
