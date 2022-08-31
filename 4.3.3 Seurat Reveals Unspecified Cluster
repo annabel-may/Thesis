@@ -1,0 +1,127 @@
+library(Seurat)
+library(clustree)
+library(EnhancedVolcano)
+library(ggplot2)
+
+set.seed(1)
+
+#loadsamples-------
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("/Volumes/Seatgate Portable Media/scRNAseq2021/SrcGFP4/outs/filtered_feature_bc_matrix/")
+
+#Generate Seurat Object----
+SGData <- CreateSeuratObject(srat.data, project = "SrcGFP_1")
+
+#Label mito and rRNA----
+SGData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+SGData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+VlnPlot(SGData, features = "nFeature_RNA", y.max = 6000) + geom_hline(yintercept=2500, linetype='dashed', col = 'red')
+VlnPlot(SGData, features = "nCount_RNA") + geom_hline(yintercept=10000, linetype='dashed', col = 'red')
+VlnPlot(SGData, features = "percent.mt") + geom_hline(yintercept=10, linetype='dashed', col = 'red')
+VlnPlot(SGData, features = "percent.ribo") + geom_hline(yintercept=1000, linetype='dashed', col = 'red')
+
+#Generated Original Data plots for Fig 4.6!----
+
+SGData <- subset(SGData, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident", ncol = 4)
+
+VlnPlot(SGData, features = "nFeature_RNA", y.max = 6000) + geom_hline(yintercept=2500, linetype='dashed', col = 'red')
+VlnPlot(SGData, features = "nCount_RNA") + geom_hline(yintercept=10000, linetype='dashed', col = 'red')
+VlnPlot(SGData, features = "percent.mt") + geom_hline(yintercept=10, linetype='dashed', col = 'red')
+VlnPlot(SGData, features = "percent.ribo") + geom_hline(yintercept=1000, linetype='dashed', col = 'red')
+
+#Generated PostQC plots for Fig 4.6!----
+
+#Nromalise data with SCTransform----
+SGData <- SCTransform(SGData)
+
+#Dimentionality reduciton----
+SGData <- RunPCA(SGData)
+
+#Dimention check
+pct <- SGData[["pca"]]@stdev / sum(SGData[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+SGData <- RunUMAP(SGData, dims = 1:9)
+SGData <- FindNeighbors(SGData, dims = 1:9)
+SGData <- FindClusters(SGData, resolution = 0.1)
+DimPlot(SGData)
+
+totalcells_cluster0 <- WhichCells(SGData, idents = "0")
+
+#DimPlot(SGData) Generates UMAP plot Fig 4.7A!----
+#totalcells_cluster0 provides cell number in cluster 0, 3602!----
+
+SGData_dim44 <- RunUMAP(SGData, dims = 1:44)
+SGData_dim44 <- FindNeighbors(SGData_dim44, dims = 1:44)
+SGData_dim44 <- FindClusters(SGData_dim44, resolution = 0.1)
+DimPlot(SGData_dim44)
+
+#DimPlot(SGData_dim44) Generates UMAP plot Fig 4.7A (inset)!----
+
+FeaturePlot(SGData, features = "percent.ribo", cols = c("yellow", "blue"))
+
+#Generates Feature plot of ribosomal reads in Fig 4.7B!----
+
+VlnPlot(SGData, features = "percent.ribo" )
+
+#Generates violin plot of ribosomal reads in Fig 4.7C!----
+
+FilteredSrcGFP1_markers <- FindAllMarkers(SGData)
+
+FilteredSrcGFP1_markers_cluster0 <- subset(FilteredSrcGFP1_markers, cluster == "0")
+SrcGFP1_markers_positive <- subset(FilteredSrcGFP1_markers_cluster0, avg_log2FC > 0)
+SrcGFP1_markers_negative <- subset(FilteredSrcGFP1_markers_cluster0, avg_log2FC < 0)
+
+#Generates number of marker genes, positive and negative!---
+
+write.csv(SrcGFP1_markers_positive, "......../SeuratUnspecified.csv")
+
+#Generates table of postive genes to be imported into flymine! ----------------
+
+toppostivie <- subset(FilteredSrcGFP1_markers_cluster0, avg_log2FC > 0.3)
+toppostivienames <- as.character(toppostivie$gene)
+top10 <- toppostivienames[1:20]
+
+topneg <- subset(FilteredSrcGFP1_markers_cluster0, avg_log2FC < -0.3)
+topnegnames <- as.character(topneg$gene)
+bottom10 <- topnegnames[1:10]
+
+top10 <- append(top10, bottom10)
+
+EnhancedVolcano(FilteredSrcGFP1_markers_cluster0, 
+                lab= FilteredSrcGFP1_markers_cluster0$gene, 
+                x = "avg_log2FC", 
+                y = "p_val_adj", 
+                xlab = bquote(~Log[2]~ 'fold change'),
+                pCutoff = 10e-50,
+                FCcutoff = 0.25,
+                selectLab = top10,
+                drawConnectors = T,
+                widthConnectors = 0.5,
+                labSize = 5,
+                col = c("#000000","#FF61CC", "#000000", "#0CB702"),
+                xlim = c(-2.5,1),
+                ,
+                colAlpha = 1,
+                maxoverlapsConnectors = 100)
+
+#Generates volcano plot of cluster 0 for Figure 4.8! ----------------
+
+
+                                           
