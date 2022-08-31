@@ -1,0 +1,407 @@
+library(Seurat)
+library(clustree)
+library(EnhancedVolcano)
+library(ggplot2)
+
+set.seed(1)
+
+#loadsamples-------
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("...../outs/filtered_feature_bc_matrix/")
+
+#Generate Seurat Object----
+SGData <- CreateSeuratObject(srat.data, project = "SrcGFP_1")
+
+#Label mito and rRNA----
+SGData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+SGData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+#Quality control subset----
+SGData <- subset(SGData, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+
+#Normalise and regress outmito and rRNA ----
+SGData <- SCTransform(SGData, vars.to.regress = c("percent.mt", "percent.ribo"))
+
+#Dimentionality reduciton----
+SGData <- RunPCA(SGData)
+
+#Dimention check
+pct <- SGData[["pca"]]@stdev / sum(SGData[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+SGData <- RunUMAP(SGData, reduction = "pca", dims = 1:44)
+SGData <- FindNeighbors(SGData, reduction = "pca", dims = 1:44)
+SGData <- FindClusters(SGData, resolution = 0.1)
+DimPlot(SGData)
+
+
+SGData <- FindClusters(SGData, resolution = c(seq(0, to = 0.5, by=0.1)))
+
+SGData@meta.data <- SGData@meta.data[, paste0("SCT_snn_res.", c(0, 0.1, 0.2, 0.3, 0.4, 0.5))]
+p1 <- clustree(SGData, node_size_range = c(1,20), node_text_size = 10, edge_width = 1)
+p1
+
+#p1 plots the clustree plot for Fig 4.11B!----
+
+#make the figure to show changes to cluster 0 for all resolutions----
+
+onlyplot <-WhichCells(SGData, idents = c(0))
+
+#Change resolution plot and save----
+SGData <- FindClusters(SGData, resolution = 1)
+DimPlot(SGData)
+DimPlot(SGData, cells = onlyplot)
+
+SGData <- RunUMAP(SGData, dims = 1:44)
+SGData <- FindNeighbors(SGData, dims = 1:44)
+
+SGData_0 <- FindClusters(SGData, resolution = 0)
+DimPlot(SGData_0)
+
+SGData_0.1 <- FindClusters(SGData, resolution = 0.1)
+DimPlot(SGData_0.1)
+
+SGData_0.2 <- FindClusters(SGData, resolution = 0.2)
+DimPlot(SGData_0.2,  cells = onlyplot))
+
+SGData_0.3 <- FindClusters(SGData, resolution = 0.3)
+DimPlot(SGData_0.3,  cells = onlyplot))
+
+SGData_0.4 <- FindClusters(SGData, resolution = 0.4)
+DimPlot(SGData_0.4,  cells = onlyplot))
+
+SGData_0.5 <- FindClusters(SGData, resolution = 0.5)
+DimPlot(SGData_0.5,  cells = onlyplot))
+
+SGData_1 <- FindClusters(SGData, resolution = 1)
+DimPlot(SGData_1,  cells = onlyplot))
+
+#Generated Original Data plots for Fig 4.11A!----
+
+#Find markers between cluster splits on clusttree graph----
+SGData <- FindClusters(SGData, resolution = 0.2)
+DimPlot(SGData)
+
+
+
+Allmarkers_res0.2 <- FindAllMarkers(SGData, only.pos = T)
+nrow(subset(Allmarkers_res0.2, cluster == 0))
+nrow(subset(Allmarkers_res0.2, cluster == 3))
+nrow(subset(Allmarkers_res0.2, cluster == 4))
+
+#Number of genes marking the splits in Fig 4.12A!----
+#List of genes names marking the splits in Fig 4.12A!----
+
+SGData <- FindClusters(SGData, resolution = 0.4)
+DimPlot(SGData)
+
+Allmarkers_res0.4 <- FindAllMarkers(SGData, only.pos = T)
+nrow(subset(Allmarkers_res0.4, cluster == 0))
+nrow(subset(Allmarkers_res0.4, cluster == 1))
+
+#Number of genes marking the splits in Fig 4.12B!----
+#List of genes names marking the splits in Fig 4.12B!----
+
+SGData <- FindClusters(SGData, resolution = 0.5)
+DimPlot(SGData)
+
+Allmarkers_res0.5 <- FindAllMarkers(SGData, only.pos = T)
+nrow(subset(Allmarkers_res0.5, cluster == 0))
+nrow(subset(Allmarkers_res0.5, cluster == 1))
+nrow(subset(Allmarkers_res0.5, cluster == 8))
+
+#Number of genes marking the splits in Fig 4.12C!----
+#List of genes names marking the splits in Fig 4.12B!----
+
+SGData <- FindClusters(SGData, resolution = 1)
+DimPlot(SGData)
+
+Allmarkers_res1 <- FindAllMarkers(SGData, only.pos = T)
+nrow(subset(Allmarkers_res1, cluster == 0))
+nrow(subset(Allmarkers_res1, cluster == 1))
+nrow(subset(Allmarkers_res1, cluster == 2))
+nrow(subset(Allmarkers_res1, cluster == 5))
+nrow(subset(Allmarkers_res1, cluster == 12))
+
+#Number of genes marking the splits in Fig 4.12D!----
+#List of genes names marking the splits in Fig 4.12C!----
+
+
+SGData <- FindClusters(SGData, resolution = 0.3)
+DimPlot(SGData)
+
+SG1_Removed <- WhichCells(SGData, idents = "0")
+SG1_Keep <-  WhichCells(SGData, idents = c("1","2","3","4","5"))
+
+DimPlot(SGData, cells.highlight = SG1_Keep)
+
+#Generated Top pannel for Fig 4.13A!----
+
+
+#Rerun data with cells removed
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("...../outs/filtered_feature_bc_matrix/")
+
+#Generate Seurat Object----
+SGData <- CreateSeuratObject(srat.data, project = "SrcGFP_1")
+
+#Label mito and rRNA----
+SGData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+SGData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+#Quality control subset----
+SGData <- subset(SGData, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+SGData <- subset(SGData, cells = SG1_Keep)
+
+#Normalise and regress out mito and rRNA ----
+SGData <- SCTransform(SGData, vars.to.regress = c("percent.mt", "percent.ribo"))
+
+#Dimentionality reduciton----
+SGData <- RunPCA(SGData)
+
+#Dimention check
+pct <- SGData[["pca"]]@stdev / sum(SGData[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+SGData <- RunUMAP(SGData, reduction = "pca", dims = 1:9)
+SGData <- FindNeighbors(SGData, reduction = "pca", dims = 1:9)
+SGData <- FindClusters(SGData, resolution = 0.5)
+DimPlot(SGData)
+
+#Generated Bottom pannel for Fig 4.13A!----
+
+
+
+
+#SrcGFP2
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("...../outs/filtered_feature_bc_matrix/")
+
+#Generate Seurat Object----
+SGData2 <- CreateSeuratObject(srat.data, project = "SrcGFP_2")
+
+#Label mito and rRNA----
+SGData2[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+SGData2[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+#Quality control subset----
+SGData2 <- subset(SGData2, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+
+
+#Normalise and regress out mito and rRNA ----
+SGData2 <- SCTransform(SGData2, vars.to.regress = c("percent.mt", "percent.ribo"))
+
+#Dimentionality reduciton----
+SGData <- RunPCA(SGData2)
+
+#Dimention check
+pct <- SGData2[["pca"]]@stdev / sum(SGData2[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+SGData2 <- RunUMAP(SGData2, reduction = "pca", dims = 1:9)
+SGData2 <- FindNeighbors(SGData2, reduction = "pca", dims = 1:9)
+SGData <- FindClusters(SGData2, resolution = 0.5)
+DimPlot(SGData2)
+
+SG2_remove <- WhichCells(SGData2, idents = c("0", "1"))
+SG2_keep <- WhichCells(SGData2, idents = c("2", "3", "4", "5"))
+
+DimPlot(SGData2, cells.highlight = SG2_keep)
+
+#Generated Top pannel for Fig 4.13B!----
+
+#Rerun with SG2 removed
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("...../outs/filtered_feature_bc_matrix/")
+
+#Generate Seurat Object----
+SGData2 <- CreateSeuratObject(srat.data, project = "SrcGFP_2")
+
+#Label mito and rRNA----
+SGData2[["percent.mt"]] <- PercentageFeatureSet(SGData2, pattern = "mt:")
+SGData2[["percent.ribo"]] <- PercentageFeatureSet(SGData2, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+#Quality control subset----
+SGData2 <- subset(SGData2, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+SGData2 <- subset(SGData2, cells = SG2_Keep)
+
+#Normalise and regress out mito and rRNA ----
+SGData2 <- SCTransform(SGData2, vars.to.regress = c("percent.mt", "percent.ribo"))
+
+#Dimentionality reduciton----
+SGData <- RunPCA(SGData2)
+
+#Dimention check
+pct <- SGData2[["pca"]]@stdev / sum(SGData2[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+SGData2 <- RunUMAP(SGData2, reduction = "pca", dims = 1:9)
+SGData2 <- FindNeighbors(SGData2, reduction = "pca", dims = 1:9)
+SGData <- FindClusters(SGData2, resolution = 0.5)
+DimPlot(SGData2)
+
+#Generated Bottom pannel for Fig 4.13B!----
+
+SG2_remove <- WhichCells(SGData2, idents = c("0", "1"))
+SG2_keep <- WhichCells(SGData2, idents = c("2", "3", "4", "5"))
+
+DimPlot(SGData2, cells.highlight = SG2_keep)
+
+
+#ArmYFP
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("...../outs/filtered_feature_bc_matrix/")
+
+#Generate Seurat Object----
+ArmData <- CreateSeuratObject(srat.data, project = "ArmYFP_1")
+
+#Label mito and rRNA----
+ArmData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+ArmData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(ArmData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+#Quality control subset----
+ArmData <- subset(ArmData, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+
+
+#Normalise and regress out mito and rRNA ----
+ArmData <- SCTransform(ArmData, vars.to.regress = c("percent.mt", "percent.ribo"))
+
+#Dimentionality reduciton----
+ArmData <- RunPCA(ArmData)
+
+#Dimention check
+pct <- ArmData[["pca"]]@stdev / sum(ArmData[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+
+ArmData <- RunUMAP(ArmData, reduction = "pca", dims = 1:44)
+ArmData <- FindNeighbors(ArmData, reduction = "pca", dims = 1:44)
+ArmData <- FindClusters(ArmData, resolution = 0.3)
+DimPlot(ArmData)
+
+ArmYFP1_keep <- WhichCells(ArmData, idents = c("2", "3", "4", "5", "6", "7", "8"))
+DimPlot(ArmData, cells.highlight = ArmYFP1_keep)
+
+DimPlot(ArmData, cells.highlight = ArmYFP1_keep)
+
+#Generated Top pannel for Fig 4.13C!----
+
+#Rerun with removed
+
+#Importing data (....../outs/filtered_feature_bc_matrix/)----
+srat.data <- Read10X("...../outs/filtered_feature_bc_matrix/")
+
+#Generate Seurat Object----
+ArmData <- CreateSeuratObject(srat.data, project = "ArmYFP_1")
+
+#Label mito and rRNA----
+ArmData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+ArmData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(ArmData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+#Quality control subset----
+ArmData <- subset(ArmData, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+ArmData <- subset(ArmData, cells = ArmYFP1_keep)
+
+
+#Normalise and regress out mito and rRNA ----
+ArmData <- SCTransform(ArmData, vars.to.regress = c("percent.mt", "percent.ribo"))
+
+#Dimentionality reduciton----
+ArmData <- RunPCA(ArmData)
+
+#Dimention check
+pct <- ArmData[["pca"]]@stdev / sum(ArmData[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+ArmData <- RunUMAP(ArmData, reduction = "pca", dims = 1:9)
+ArmData <- FindNeighbors(ArmData, reduction = "pca", dims = 1:9)
+ArmData <- FindClusters(ArmData, resolution = 0.3)
+DimPlot(ArmData)
+
+#Generated Bottom pannel for Fig 4.13C!----
+
+
+
