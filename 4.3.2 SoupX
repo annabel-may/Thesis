@@ -1,0 +1,396 @@
+
+#Package and library installation------
+library(dplyr)
+library(SoupX)
+library(Matrix)
+library(ggplot2)
+library(Seurat)
+library(tibble)
+library(ggVennDiagram)
+library(VennDiagram) 
+
+set.seed(1)
+
+#Manual load data for SrcGFP_1 load the /outs/ folder
+tmpDir <- (".   ")
+toc = Seurat::Read10X(file.path(tmpDir, "filtered_feature_bc_matrix"))
+tod = Seurat::Read10X(file.path(tmpDir, "raw_feature_bc_matrix"))
+sc = SoupChannel(tod, toc)
+
+#Profile the soup
+sc = SoupChannel(tod, toc, calcSoupProfile = FALSE)
+sc = estimateSoup(sc)
+toc = sc$toc
+scNoDrops = SoupChannel(toc, toc, calcSoupProfile = FALSE)
+
+# Calculate soup profile
+soupProf = data.frame(row.names = rownames(toc), est = rowSums(toc)/sum(toc), counts = rowSums(toc))
+scNoDrops = setSoupProfile(scNoDrops, soupProf)
+
+#Generate cluster information
+
+srat <- CreateSeuratObject(toc)
+
+srat[["percent.mt"]] <- PercentageFeatureSet(srat, pattern = "mt:")
+srat[["percent.ribo"]] <- PercentageFeatureSet(srat, pattern = "^Rp[LS]")
+VlnPlot(srat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+srat <- SCTransform(object = srat)
+srat <- RunPCA(srat)
+
+#Dimention check
+pct <- srat[["pca"]]@stdev / sum(srat[["pca"]]@stdev) * 100
+
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+srat <- RunUMAP(srat, dims = 1:13)
+srat <- FindNeighbors(srat, dims = 1:13)
+srat <- FindClusters(srat, resolution = 0.1)
+DimPlot(srat)
+SrcGFP1 <- FindAllMarkers(srat, only.pos = T)
+SrcGFP1$enrich <- SrcGFP1$pct.1/SrcGFP1$pct.2
+
+#Make our own metadata
+#dimrecuct <- srat@reductions$umap@cell.embeddings
+#sc = setClusters(sc, setNames(srat$seurat_clusters, colnames(srat)))
+#sc = setDR(sc, srat@reductions$umap@cell.embeddings)
+
+PBMC_DR <- as.data.frame(Embeddings(srat, reduction = "umap"))
+colnames(PBMC_DR) <- c('RD1','RD2') 
+PBMC_DR$Cluster <- factor(srat@meta.data[rownames(PBMC_DR),'seurat_clusters'])
+
+sc = setClusters(sc,setNames(PBMC_DR$Cluster,rownames(PBMC_DR)))
+sc = setDR(sc,PBMC_DR[colnames(sc$toc),c('RD1','RD2')])
+
+#DimPlot(srat) generates Figure 4.4A! -------------------------------
+#SrcGFP1 returns all markers for UMAP, cluster 0 is used for Table 4.2! -----------------------------
+
+##Blanket contamination---------------
+
+##Set the percentage contamination threshold (if you want a blanket contamination percentage)
+blanketsc <- setContaminationFraction(sc, 0.2)
+blanketout = adjustCounts(blanketsc)
+
+cntSoggy = rowSums(blanketsc$toc > 0)
+cntStrained = rowSums(out > 0)
+mostZeroed = tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10)
+mostZeroed
+
+mostZeroedC0.2 <- as.data.frame(mostZeroed)
+
+Quant= tail(sort(rowSums(blanketsc$toc > out)/rowSums(blanketsc$toc > 0)), n = 10)
+
+QuantitiveC0.2 <- as.data.frame(Quant)
+QuantitiveC0.2
+
+blanket = CreateSeuratObject(blanketout)
+
+blanket[["percent.mt"]] <- PercentageFeatureSet(blanket, pattern = "mt:")
+blanket[["percent.ribo"]] <- PercentageFeatureSet(blanket, pattern = "^Rp[LS]")
+VlnPlot(blanket, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+blanket <- SCTransform(object = blanket)
+blanket <- RunPCA(blanket)
+
+#Dimention check
+pct <- blanket[["pca"]]@stdev / sum(blanket[["pca"]]@stdev) * 100
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+
+blanket <- RunUMAP(blanket, dims = 1:13)
+blanket <- FindNeighbors(blanket, dims = 1:13)
+blanket <- FindClusters(blanket, resolution = 0.1)
+DimPlot(blanket)
+FeaturePlot(blanket, features = 	"nFeature_RNA", cols = c("yellow", "blue"), order = T, max.cutoff = 4000)
+blanketmarkers <- FindAllMarkers(blanket, only.pos = T)
+blanketmarkers$enrich <- blanketmarkers$pct.1/blanketmarkers$pct.2
+
+DimPlot(blanket) generates Figure 4.4B! -------------------------------
+#blanketmarkers returns all markers for UMAP, cluster 0 is used for Table 4.2! -----------------------------
+
+
+##Notch cluster ------------
+notchsc <- sc
+notchclusternames <- c("E(spl)m4-BFM", "E(spl)m2-BFM", "E(spl)malpha-BFM", "E(spl)m5-HLH", "E(spl)m3-HLH", "E(spl)m8-HLH", "E(spl)m7-HLH")
+useToEst = estimateNonExpressingCells(notchsc,nonExpressedGeneList = list(NOTCH=notchclusternames),clusters=FALSE)
+
+plotMarkerMap(notchsc, geneSet = notchclusternames, useToEst = useToEst)
+
+#useToEst = estimateNonExpressingCells(sc, nonExpressedGeneList = list(NOTCH = notchclusternames))
+#plotMarkerMap(sc, geneSet = igGenes, useToEst = useToEst)
+
+notchsc = calculateContaminationFraction(notchsc, list(NOTCH = notchclusternames), useToEst = useToEst, forceAccept = T)
+
+notchout = adjustCounts(notchsc)
+
+
+cntSoggy = rowSums(sc$toc > 0)
+cntStrained = rowSums(notchout > 0)
+mostZeroed = tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10)
+mostZeroed
+mostZeroed <- as.data.frame(mostZeroed)
+
+quant <- tail(sort(rowSums(sc$toc > out)/rowSums(sc$toc > 0)), n = 10)
+quant<- as.data.frame(quant)
+plotChangeMap(notchsc,notchout, "hth")
+
+library(Seurat)
+notch = CreateSeuratObject(notchout)
+
+notch[["percent.mt"]] <- PercentageFeatureSet(notch, pattern = "mt:")
+notch[["percent.ribo"]] <- PercentageFeatureSet(notch, pattern = "^Rp[LS]")
+VlnPlot(notch, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+notch <- SCTransform(object = notch)
+notch <- RunPCA(notch)
+
+#Dimention check
+pct <- notch[["pca"]]@stdev / sum(notch[["pca"]]@stdev) * 100
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+
+notch <- RunUMAP(notch, dims = 1:15)
+notch <- FindNeighbors(notch, dims = 1:15)
+notch <- FindClusters(notch, resolution = 0.1)
+DimPlot(notch)
+FeaturePlot(notch, features = 	"nFeature_RNA", cols = c("yellow", "blue"), order = T, max.cutoff = 4000)
+notchmarkers <- FindAllMarkers(notch, only.pos = T)
+notchmarkers$enrich <- notchmarkers$pct.1/notchmarkers$pct.2
+
+DimPlot(notch) generates Figure 4.4C! -------------------------------
+#notchmarkers returns all markers for UMAP, cluster 0 is used for Table 4.2! -----------------------------
+
+##Using SoupX autoEst contamination-----
+
+
+##Top genes likely to be contaminating 
+##NOTE: These are often mitochondrial genes and ribosomal like proteins and are ubiquitously expressed 
+contam_genes <- head(sc$soupProfile[order(sc$soupProfile$est, decreasing = TRUE), ], n = 50)
+contam_gene_name <- rownames(contam_genes)
+contam_gene_name
+
+##Plotmarker distribution - suggests SoupX's best suggestions for contaminating genes
+plotMarkerDistribution(sc)
+
+#Now with all the cluster data ect we can auto estimate however this provides a high level of contamination estimated
+autosc = autoEstCont(sc, forceAccept = T)
+
+autoout = adjustCounts(autosc)
+
+cntSoggy = rowSums(autosc$toc > 0)
+cntStrained = rowSums(out > 0)
+mostZeroed = tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10)
+mostZeroed
+mostZeroed <- as.data.frame(mostZeroed)
+
+quant <- tail(sort(rowSums(autosc$toc > out)/rowSums(autosc$toc > 0)), n = 10)
+quant<- as.data.frame(quant)
+
+
+auto = CreateSeuratObject(autoout)
+
+auto[["percent.mt"]] <- PercentageFeatureSet(auto, pattern = "mt:")
+auto[["percent.ribo"]] <- PercentageFeatureSet(auto, pattern = "^Rp[LS]")
+VlnPlot(auto, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+auto <- SCTransform(object = auto)
+auto <- RunPCA(auto)
+
+#Dimention check
+pct <- auto[["pca"]]@stdev / sum(auto[["pca"]]@stdev) * 100
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+
+auto <- RunUMAP(auto, dims = 1:17)
+auto <- FindNeighbors(auto, dims = 1:17)
+auto <- FindClusters(auto, resolution = 0.1)
+DimPlot(auto)
+FeaturePlot(auto, features = 	"nFeature_RNA", cols = c("yellow", "blue"), order = T, max.cutoff = 4000)
+automarkers <- FindAllMarkers(auto, only.pos = T)
+automarkers$enrich <- automarkers$pct.1/automarkers$pct.2
+
+DimPlot(auto) generates Figure 4.4D! -------------------------------
+#automarkers returns all markers for UMAP, cluster 0 is used for Table 4.2! -----------------------------
+
+
+##Known salivary gland genes cluster ------------
+SGsc <- sc
+sgGenes <- c("CrebA", "PH4alphaSG2", "Gmap", "cv-c")
+useToEst = estimateNonExpressingCells(SGsc,nonExpressedGeneList = list(SG=sgGenes),clusters=FALSE)
+
+plotMarkerMap(SGsc, geneSet = sgGenes, useToEst = useToEst)
+
+#useToEst = estimateNonExpressingCells(sc, nonExpressedGeneList = list(SG = sgGenes))
+#plotMarkerMap(sc, geneSet = sgGenes, useToEst = useToEst)
+
+SGsc = calculateContaminationFraction(SGsc, list(SG = sgGenes), useToEst = useToEst, forceAccept = T)
+
+SGout = adjustCounts(SGsc)
+
+
+cntSoggy = rowSums(SGsc$toc > 0)
+cntStrained = rowSums(SGout > 0)
+mostZeroed = tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10)
+mostZeroed
+mostZeroed <- as.data.frame(mostZeroed)
+
+quant <- tail(sort(rowSums(SGsc$toc > out)/rowSums(SGsc$toc > 0)), n = 10)
+quant <- as.data.frame(quant)
+plotChangeMap(SGsc, out, "hth")
+
+library(Seurat)
+SGsrat = CreateSeuratObject(SGout)
+
+SGsrat[["percent.mt"]] <- PercentageFeatureSet(SGsrat, pattern = "mt:")
+SGsrat[["percent.ribo"]] <- PercentageFeatureSet(SGsrat, pattern = "^Rp[LS]")
+VlnPlot(SGsrat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), ncol = 4)
+
+SGsrat <- SCTransform(object = SGsrat)
+SGsrat <- RunPCA(SGsrat)
+
+#Dimention check
+pct <- SGsrat[["pca"]]@stdev / sum(SGsrat[["pca"]]@stdev) * 100
+# Calculate cumulative percents for each PC
+cumu <- cumsum(pct)
+# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
+co1 <- which(cumu > 90 & pct < 5)[1]
+# Determine the difference between variation of PC and subsequent PC & last point where change of % of variation is more than 0.1%.
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+#Lowest dimentionality value between the two
+pcs <- min(co1, co2)
+pcs
+
+
+SGsrat <- RunUMAP(SGsrat, dims = 1:11)
+SGsrat <- FindNeighbors(SGsrat, dims = 1:11)
+SGsrat <- FindClusters(SGsrat, resolution = 0.1)
+DimPlot(SGsrat)
+FeaturePlot(SGsrat, features = 	"nFeature_RNA", cols = c("yellow", "blue"), order = T, max.cutoff = 4000)
+SGmarkers <- FindAllMarkers(SGsrat, only.pos = T)
+SGmarkers$enrich <- SGmarkers$pct.1/SGmarkers$pct.2
+
+DimPlot(SGsrat) generates Figure 4.4E! -------------------------------
+#SGmarkers returns all markers for UMAP, cluster 0 is used for Table 4.2! -----------------------------
+
+
+
+#Load in cluster findallmarkers from SoupX marker comparison
+
+#Markers from no soupX treatment just seurat no vars to regress or filtering
+nosoupxnames <- filter(SrcGFP1, cluster == "0")
+nosoupxnames <- (rownames(nosoupxnames))
+nosoupxnames <- as.data.frame(nosoupxnames)
+nosoupxnames$soupX <- "none"
+names(nosoupxnames) <- c("gene", "soupX")
+nosoupxnames$inoriginal <- nosoupxnames$gene %in% nosoupxnames$gene
+
+#nosoupxnames generates number of shared markers in Table 4.2! -----------------------------
+
+
+#Markers from 20% contamintion
+blanketnames <- filter(blanketmarkers, cluster == "0") 
+blanketnames<- (rownames(blanketnames))
+blanketnames <- as.data.frame(blanketnames)
+blanketnames$soupX <- "blanket"
+names(blanketnames) <- c("gene", "soupX")
+blanketnames$inoriginal <- blanketnames$gene %in% nosoupxnames$gene
+
+#blanketnames generates number of shared markers in Table 4.2! -----------------------------
+
+
+
+#Markers from autoestimate contamintion (68%)
+autonames <- filter(automarkers, cluster == "0") 
+autonames<- (rownames(autonames))
+autonames <- as.data.frame(autonames)
+autonames$soupX <- "auto"
+names(autonames) <- c("gene", "soupX")
+autonames$inoriginal <- autonames$gene %in% nosoupxnames$gene
+
+#autonames generates number of shared markers in Table 4.2! -----------------------------
+
+#Markers from E(spl) cluster names contamintion (45%)
+notchnames <- filter(notchmarkers, cluster == "0") 
+notchnames<- (rownames(notchnames))
+notchnames <- as.data.frame(notchnames)
+notchnames$soupX <- "notch"
+names(notchnames) <- c("gene", "soupX")
+notchnames$inoriginal <- notchnames$gene %in% nosoupxnames$gene\
+
+#notchnames generates number of shared markers in Table 4.2! -----------------------------
+
+#Markers from Salivary cluster names contamintion (95%)
+SGnames <- filter(SGmarkers, cluster == "0") 
+SGnames<- (rownames(SGnames))
+SGnames <- as.data.frame(SGnames)
+SGnames$soupX <- "SG"
+names(SGnames) <- c("gene", "soupX")
+SGnames$inoriginal <- SGnames$gene %in% nosoupxnames$gene
+
+#SGnames generates number of shared markers in Table 4.2! -----------------------------
+
+names(nosoupxnames) 
+names(blanketnames)
+names(autonames)
+names(notchnames)
+names(SGnames) 
+
+
+#Merge all markers
+fullcluster0 <- rbind(nosoupxnames,blanketnames,autonames,notchnames,SGnames)
+
+
+#Table showing shared and unique markers
+vennsummary <- tibble(soupX = "none", True = nrow(filter(fullcluster0, soupX == "none")), False = nrow(filter(fullcluster0, soupX == "none", inoriginal == "FALSE")), Total = nrow(filter(fullcluster0, soupX == "none")))
+vennsummary <- add_row(vennsummary, soupX = "blanket",
+                       True = nrow(filter(blanketnames, inoriginal == "TRUE")), 
+                       False = nrow(filter(blanketnames, inoriginal == "FALSE")),
+                       Total = nrow(filter(fullcluster0, soupX == "blanket")))
+vennsummary <- add_row(vennsummary, soupX = "auto",
+                       True = nrow(filter(autonames, inoriginal == "TRUE")), 
+                       False = nrow(filter(autonames, inoriginal == "FALSE")),
+                       Total = nrow(filter(fullcluster0, soupX == "auto")))
+vennsummary <- add_row(vennsummary, soupX = "notch",
+                       True = nrow(filter(notchnames, inoriginal == "TRUE")), 
+                       False = nrow(filter(notchnames, inoriginal == "FALSE")),
+                       Total = nrow(filter(fullcluster0, soupX == "notch")))
+vennsummary <- add_row(vennsummary, soupX = "SG",
+                       True = nrow(filter(SGnames, inoriginal == "TRUE")), 
+                       False = nrow(filter(SGnames, inoriginal == "FALSE")),
+                       Total = nrow(filter(fullcluster0, soupX == "SG")))
+
+#Values for Fig 4.5 Venn Diagrams generated! ----------------------------
