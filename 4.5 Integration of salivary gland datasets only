@@ -1,0 +1,183 @@
+library(Seurat)
+library(clustree)
+library(EnhancedVolcano)
+
+set.seed(1)
+
+#Importing data----
+srat.data3 <- Read10X("/Volumes/Seatgate Portable Media/scRNAseq2021/SrcGFP3/outs/filtered_feature_bc_matrix/")
+SrcGFP_3 <- CreateSeuratObject(srat.data3, project = "SrcGFP_3")
+srat.data4 <- Read10X("/Volumes/Seatgate Portable Media/scRNAseq2021/SrcGFP4/outs/filtered_feature_bc_matrix/")
+SrcGFP_4 <- CreateSeuratObject(srat.data4, project = "SrcGFP_4")
+
+#Merge data----
+SGData <- merge(SrcGFP_3, y = c(SrcGFP_4), add.cell.ids = c("SrcGFP3", "SrcGFP4"), project = "SrcGFP")
+
+#Label mito and rRNA----
+SGData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+SGData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident", ncol = 4)
+
+#Setting limits for nFeature, nCount, percent.mt and percent.ribo----
+SGData <- subset(SGData, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident", ncol = 4)
+
+#Intergrate dataset, SCTransform normalize----
+SrcGFP.list <- SplitObject(SGData, split.by = "orig.ident")
+SrcGFP.list <- lapply(X = SrcGFP.list, FUN = SCTransform, vars.to.regress = c("percent.mt", "percent.ribo"))
+features <- SelectIntegrationFeatures(object.list = SrcGFP.list, nfeatures = 3000)
+SrcGFP.list <- PrepSCTIntegration(object.list = SrcGFP.list, anchor.features = features)
+SrcGFP.anchors <- FindIntegrationAnchors(object.list = SrcGFP.list, normalization.method = "SCT", anchor.features = features)
+SGData <- IntegrateData(anchorset = SrcGFP.anchors, normalization.method = "SCT")
+
+#Run PCA----
+SGData <- RunPCA(SGData)
+
+#Estimate dimentions----
+pct <- SGData[["pca"]]@stdev / sum(SGData[["pca"]]@stdev) * 100
+cumu <- cumsum(pct)
+co1 <- which(cumu > 90 & pct < 5)[1]
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+pcs <- min(co1, co2)
+pcs
+
+#Plot dimentions 44 for UMAP neighbours at 1:12/res0.1 provides better seperation and is the upper bound----
+SGData <- RunUMAP(SGData, reduction = "pca", dims = 1:44)
+DimPlot(SGData, reduction = "umap", group.by = "orig.ident")
+SGData <- FindNeighbors(SGData, reduction = "pca", dims = 1:44)
+SGData <- FindClusters(SGData, resolution = 0.4)
+DimPlot(SGData)
+
+#Increase resolution for clustree analysis for res 0 to 0.5----
+SGData <- FindClusters(SGData, resolution = c(seq(0, to = 0.5, by=0.1)))
+DimPlot(SGData)
+
+#DimPlot(SGData) generates UMAP in Figure 4.17B!-----------------
+
+#Clustree----
+SGData@meta.data <- SGData@meta.data[, paste0("integrated_snn_res.", c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 1))]
+p1 <- clustree(SGData, node_size_range = c(1, 20), node_text_size = 5, edge_width = 1)
+p1
+
+#p1 generates clustree in Figure 4.17A!-----------------
+
+
+#res0.4-----
+res0.4keep <- WhichCells(SGData, idents = c("1", "3", "4", "5","6", "7", "8", "9", "10", "11", "12"))
+DimPlot(SGData, cells = res0.4keep)
+
+#Reanalysis with cluster 0 gone----
+#Importing data----
+srat.data3 <- Read10X("/Volumes/Seatgate Portable Media/scRNAseq2021/SrcGFP3/outs/filtered_feature_bc_matrix/")
+SrcGFP_3 <- CreateSeuratObject(srat.data3, project = "SrcGFP_3")
+srat.data4 <- Read10X("/Volumes/Seatgate Portable Media/scRNAseq2021/SrcGFP4/outs/filtered_feature_bc_matrix/")
+SrcGFP_4 <- CreateSeuratObject(srat.data4, project = "SrcGFP_4")
+
+#Merge data----
+SGData <- merge(SrcGFP_3, y = c(SrcGFP_4), add.cell.ids = c("SrcGFP3", "SrcGFP4"), project = "SrcGFP")
+
+#Subset data----
+SGData <- subset(SGData, cells = res0.4keep)
+
+
+#Label mito and rRNA----
+SGData[["percent.mt"]] <- PercentageFeatureSet(SGData, pattern = "mt:")
+SGData[["percent.ribo"]] <- PercentageFeatureSet(SGData, pattern = "^Rp[LS]")
+VlnPlot(SGData, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident", ncol = 4)
+
+#Intergrate dataset, SCTransform normalize----
+SrcGFP.list <- SplitObject(SGData, split.by = "orig.ident")
+SrcGFP.list <- lapply(X = SrcGFP.list, FUN = SCTransform, vars.to.regress = c("percent.mt", "percent.ribo"))
+features <- SelectIntegrationFeatures(object.list = SrcGFP.list, nfeatures = 3000)
+SrcGFP.list <- PrepSCTIntegration(object.list = SrcGFP.list, anchor.features = features)
+SrcGFP.anchors <- FindIntegrationAnchors(object.list = SrcGFP.list, normalization.method = "SCT", anchor.features = features)
+SGData <- IntegrateData(anchorset = SrcGFP.anchors, normalization.method = "SCT")
+
+#Run PCA----
+SGData <- RunPCA(SGData)
+
+#Estimate dimentions----
+pct <- SGData[["pca"]]@stdev / sum(SGData[["pca"]]@stdev) * 100
+cumu <- cumsum(pct)
+co1 <- which(cumu > 90 & pct < 5)[1]
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+pcs <- min(co1, co2)
+pcs
+
+#Check All dimentions----
+setwd("/Volumes/Seatgate Portable Media/scRNAseq2021/Seurat/Combined/SGCellonlyOffical/Dims/")
+
+
+dimseq <- seq(2, to = 45)
+for (i in dimseq)
+{ 
+  SGData <- RunUMAP(SGData, reduction = "pca", dims = 1:i)
+  origDim <- DimPlot(SGData, reduction = "umap", group.by = "orig.ident")
+  SGData <- FindNeighbors(SGData, reduction = "pca", dims = 1:i)
+  SGData <- FindClusters(SGData, resolution = 0.1)
+  SGDataPlot <- DimPlot(SGData)
+  combinedplot <- origDim + SGDataPlot
+  png(paste(i, ".png", sep = ""), width=1000, height=500)
+  plot(combinedplot)
+  dev.off() 
+}
+
+
+
+#Plot dimentions 10 provides lineage and is the lower bound----
+SGData <- RunUMAP(SGData, reduction = "pca", dims = 1:10)
+DimPlot(SGData, reduction = "umap", group.by = "orig.ident")
+SGData <- FindNeighbors(SGData, reduction = "pca", dims = 1:10)
+SGData@active.assay <- "integrated" 
+SGData <- FindClusters(SGData, resolution = 0.7)
+DimPlot(SGData)
+
+#DimPlot(SGData) generates UMAP in Figure 4.17C!-----------------
+
+write.csv(res0.4keep, "/Volumes/Seatgate Portable Media/scRNAseq2021/Seurat/Combined/SGCellonlyOffical/cellstokeepforSGonly.csv")
+
+DimPlot(Allcells, split.by = "orig.ident")
+
+#DimPlot(Allcells, split.by = "orig.ident") generates UMAP in Figure 4.18A!-----------------
+
+
+SGCellsonly <- SetIdent(SGData, value = SGData@meta.data$orig.ident)
+
+SGCellsonly@active.assay <- "SCT" 
+SGCellsonly <- PrepSCTFindMarkers(SGCellsonly)
+SGDataMarkers <- FindAllMarkers(SGCellsonly)
+
+SGvolcPlot <- subset(SGDataMarkers, cluster == "SrcGFP_2")
+
+toppostivie <- subset(SGvolcPlot, avg_log2FC > 0.3)
+toppostivienames <- rownames(toppostivie)
+top10 <- toppostivienames[1:20]
+
+topneg <- subset(SGvolcPlot, avg_log2FC < -0.3)
+topnegnames <- rownames(topneg)
+bottom10 <- topnegnames[1:10]
+
+top10 <- append(top10, bottom10)
+
+
+EnhancedVolcano(SGvolcPlot, 
+                lab= rownames(SGvolcPlot), 
+                x = "avg_log2FC", 
+                y = "p_val_adj", 
+                xlab = bquote(~Log[2]~ 'fold change'),
+                pCutoff = 10e-100,
+                FCcutoff = 0.25,
+                selectLab = top10,
+                drawConnectors = T,
+                widthConnectors = 0.5,
+                labSize = 5,
+                col = c("#000000","#FF61CC", "#000000", "#0CB702"),
+                xlim = c(-1.5,1.5),
+                ,
+                colAlpha = 1,
+                maxoverlapsConnectors = 100)
+
+#EnhancedVolcano generates volcano plot in Figure 4.18B!-----------------
+
+
+        
