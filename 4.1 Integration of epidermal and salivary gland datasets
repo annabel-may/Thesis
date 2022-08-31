@@ -1,0 +1,248 @@
+library(Seurat)
+library(clustree)
+library(EnhancedVolcano)
+
+#loadsamples-------
+
+SrcGFP_1.data <- readRDS("/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/SrcGFP_1.rds")
+SrcGFP_2.data <- readRDS("/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/SrcGFP_2.rds")
+ArmYFP.data <- readRDS("/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/ArmYFP.rds")
+
+
+#Generate Seurat Object 
+SrcGFP_1 <- CreateSeuratObject(SrcGFP_1.data)
+SrcGFP_2 <- CreateSeuratObject(SrcGFP_2.data)
+ArmYFP <- CreateSeuratObject(ArmYFP.data)
+
+SrcGFP_1$orig.ident <- "SrcGFP_1"
+SrcGFP_2$orig.ident <- "SrcGFP_2"
+ArmYFP$orig.ident <- "ArmYFP"
+
+SrcGFP.combined <- merge(SrcGFP_1, y = c(SrcGFP_2, ArmYFP), add.cell.ids = c("SrcGFP1", "SrcGFP2", "ArmYFP"))
+
+SrcGFP.combined[["percent.mt"]] <- PercentageFeatureSet(SrcGFP.combined, pattern = "mt:")
+SrcGFP.combined[["percent.ribo"]] <- PercentageFeatureSet(SrcGFP.combined, pattern = "^Rp[LS]")
+VlnPlot(SrcGFP.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident" , ncol = 4)
+
+SrcGFP.combined <- subset(SrcGFP.combined, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+VlnPlot(SrcGFP.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident" , ncol = 4)
+
+SrcGFP.list <- SplitObject(SrcGFP.combined, split.by = "orig.ident")
+SrcGFP.list
+SrcGFP.list <- lapply(X = SrcGFP.list, FUN = SCTransform, vars.to.regress = c("percent.mt", "percent.ribo"))
+features <- SelectIntegrationFeatures(object.list = SrcGFP.list, nfeatures = 3000)
+SrcGFP.list <- PrepSCTIntegration(object.list = SrcGFP.list, anchor.features = features)
+
+SrcGFP.anchors <- FindIntegrationAnchors(object.list = SrcGFP.list, normalization.method = "SCT", 
+                                         anchor.features = features)
+SrcGFP.combined.sct <- IntegrateData(anchorset = SrcGFP.anchors, normalization.method = "SCT")
+
+SrcGFP.combined.sct <- RunPCA(SrcGFP.combined.sct)
+
+#Estimate dimentions----
+pct <- SrcGFP.combined.sct[["pca"]]@stdev / sum(SrcGFP.combined.sct[["pca"]]@stdev) * 100
+cumu <- cumsum(pct)
+co1 <- which(cumu > 90 & pct < 5)[1]
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+pcs <- min(co1, co2)
+pcs
+
+#Plot dimentions 44 for UMAP it is the upper bound of dimentions ----
+SrcGFP.combined.sct <- RunUMAP(SrcGFP.combined.sct, reduction = "pca", dims = 1:44)
+DimPlot(SrcGFP.combined.sct, reduction = "umap", group.by = "orig.ident")
+SrcGFP.combined.sct <- FindNeighbors(SrcGFP.combined.sct, reduction = "pca", dims = 1:44)
+SrcGFP.combined.sct <- FindClusters(SrcGFP.combined.sct, resolution = 0.3)
+DimPlot(SrcGFP.combined.sct)
+
+#DimPlot(SrcGFP.combined.sct) plot generated for Fig 4.14B!-----------
+
+#Clustree----
+SrcGFP.combined.sct@active.assay <- "integrated" 
+
+SrcGFP.combined.sct <- FindClusters(SrcGFP.combined.sct, resolution = c(seq(0, to = 0.5, by=0.1)))
+SrcGFP.combined.sct <- FindClusters(SrcGFP.combined.sct, resolution = 1)
+DimPlot(SrcGFP.combined.sct)
+
+SrcGFP.combined.sct@meta.data <- SrcGFP.combined.sct@meta.data[, paste0("integrated_snn_res", c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 1))]
+p1 <- clustree(SrcGFP.combined.sct, node_size_range = c(1, 10), node_text_size = 5, edge_width = 1)
+p1
+
+#Clustree plot generated for Fig 4.14A!-----------
+
+
+#Use res0.3 remove cluster 0,3 and 8----
+SrcGFP.combined.sct <- FindClusters(SrcGFP.combined.sct, resolution = 0.3)
+DimPlot(SrcGFP.combined.sct)
+SrcGFP.combined.sct <- PrepSCTFindMarkers(SrcGFP.combined.sct)
+SrcGFP.combined.sct@active.assay <- "SCT" 
+CombinedMarkers <- FindAllMarkers(SrcGFP.combined.sct)
+
+
+CellstoKeepALL <- WhichCells(SrcGFP.combined.sct, idents = c("1", "2", "4", "5", "6", "7", "9", "10", "11", "12", "13", "14" ))
+DimPlot(SrcGFP.combined.sct, cells.highlight = CellstoKeepALL)
+
+#Rerun everything----
+
+#loadsamples-------
+
+SrcGFP_1.data <- readRDS("/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/SrcGFP_1.rds")
+SrcGFP_2.data <- readRDS("/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/SrcGFP_2.rds")
+ArmYFP.data <- readRDS("/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/ArmYFP.rds")
+
+
+#Generate Seurat Object 
+SrcGFP_1 <- CreateSeuratObject(SrcGFP_1.data)
+SrcGFP_2 <- CreateSeuratObject(SrcGFP_2.data)
+ArmYFP <- CreateSeuratObject(ArmYFP.data)
+
+SrcGFP_1$orig.ident <- "SrcGFP_1"
+SrcGFP_2$orig.ident <- "SrcGFP_2"
+ArmYFP$orig.ident <- "ArmYFP"
+
+SrcGFP.combined <- merge(SrcGFP_1, y = c(SrcGFP_2, ArmYFP), add.cell.ids = c("SrcGFP1", "SrcGFP2", "ArmYFP"))
+
+SrcGFP.combined[["percent.mt"]] <- PercentageFeatureSet(SrcGFP.combined, pattern = "mt:")
+SrcGFP.combined[["percent.ribo"]] <- PercentageFeatureSet(SrcGFP.combined, pattern = "^Rp[LS]")
+VlnPlot(SrcGFP.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident" , ncol = 4)
+
+SrcGFP.combined <- subset(SrcGFP.combined, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & nCount_RNA <10000 & percent.mt < 10)
+SrcGFP.combined <- subset(SrcGFP.combined, cells = CellstoKeepALL)
+
+VlnPlot(SrcGFP.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), split.by = "orig.ident" , ncol = 4)
+
+SrcGFP.list <- SplitObject(SrcGFP.combined, split.by = "orig.ident")
+SrcGFP.list
+SrcGFP.list <- lapply(X = SrcGFP.list, FUN = SCTransform, vars.to.regress = c("percent.mt", "percent.ribo"))
+features <- SelectIntegrationFeatures(object.list = SrcGFP.list, nfeatures = 3000)
+SrcGFP.list <- PrepSCTIntegration(object.list = SrcGFP.list, anchor.features = features)
+
+SrcGFP.anchors <- FindIntegrationAnchors(object.list = SrcGFP.list, normalization.method = "SCT", 
+                                         anchor.features = features)
+SrcGFP.combined.sct <- IntegrateData(anchorset = SrcGFP.anchors, normalization.method = "SCT")
+
+SrcGFP.combined.sct <- RunPCA(SrcGFP.combined.sct)
+
+#Estimate dimentions----
+pct <- SrcGFP.combined.sct[["pca"]]@stdev / sum(SrcGFP.combined.sct[["pca"]]@stdev) * 100
+cumu <- cumsum(pct)
+co1 <- which(cumu > 90 & pct < 5)[1]
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+pcs <- min(co1, co2)
+pcs
+
+#Plot dimentions 10 for UMAP it is the lower bound of dimentions ----
+SrcGFP.combined.sct <- RunUMAP(SrcGFP.combined.sct, reduction = "pca", dims = 1:10)
+DimPlot(SrcGFP.combined.sct, reduction = "umap", group.by = "orig.ident")
+SrcGFP.combined.sct <- FindNeighbors(SrcGFP.combined.sct, reduction = "pca", dims = 1:10)
+SrcGFP.combined.sct <- FindClusters(SrcGFP.combined.sct, resolution = 0.4)
+DimPlot(SrcGFP.combined.sct)
+
+#DimPlot(SrcGFP.combined.sct) plot generated for Fig 4.14C!------------------
+
+SrcGFP.combined.sct <- FindClusters(SrcGFP.combined.sct, resolution = 0.3)
+DimPlot(SrcGFP.combined.sct)
+SrcGFP.combined.sct <- PrepSCTFindMarkers(SrcGFP.combined.sct)
+SrcGFP.combined.sct@active.assay <- "SCT" 
+CombinedMarkers <- FindAllMarkers(SrcGFP.combined.sct)
+
+saveRDS(SrcGFP.combined.sct, "/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/SALIVARYANDEPIDERMAL_FINAL.rds")
+
+SrcGFP.combined.sct@active.assay <- "integrated"
+SrcGFP.combined.sct@active.ident
+
+SrcGFP.combined.sct <- SetIdent(SrcGFP.combined.sct, value = SrcGFP.combined.sct@meta.data$orig.ident)
+DimPlot(SrcGFP.combined.sct)
+SrcGFP.combined.sct@active.assay <- "SCT" 
+SampleMarkers <- FindAllMarkers(SrcGFP.combined.sct)
+
+SrcGFP.combined.sct <- SetIdent(SrcGFP.combined.sct, value = SrcGFP.combined.sct@meta.data$orig.ident)
+DimPlot(SrcGFP.combined.sct)
+SrcGFP.combined.sct <- RenameIdents(object = SrcGFP.combined.sct, SrcGFP_1 = "SG", SrcGFP_2 = "SG", ArmYFP = "Epidermal")
+SrcGFP.combined.sct@active.assay <- "SCT" 
+SGMarkers <- FindAllMarkers(SrcGFP.combined.sct, logfc.threshold = 0)
+DimPlot(SrcGFP.combined.sct)
+
+#DimPlot(SrcGFP.combined.sct) plot generated for Fig 4.15A!------------------
+
+SGMarkersVolcPlot <- subset(SGMarkers, cluster == "SG")
+write.csv(SGMarkersVolcPlot, "/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/SGvsEpidermal_BasedonSeqSample.csv")
+
+toppostivie <- subset(SGMarkersVolcPlot, avg_log2FC > 0.3)
+toppostivienames <- rownames(toppostivie)
+top10 <- toppostivienames[1:50]
+
+topneg <- subset(SGMarkersVolcPlot, avg_log2FC < 0.3)
+topnegnames <- rownames(topneg)
+bottom10 <- topnegnames[1:10]
+
+top10 <- append(top10, bottom10)
+
+EnhancedVolcano(SGMarkersVolcPlot, 
+                lab= rownames(SGMarkersVolcPlot), 
+                x = "avg_log2FC", 
+                y = "p_val_adj", 
+                xlab = bquote(~Log[2]~ 'fold change'),
+                pCutoff = 10e-10,
+                FCcutoff = 0.25,
+                drawConnectors = T,
+                widthConnectors = 0.5,
+                labSize = 5,
+                col = c("#000000","#00BFC4", "#000000", "#F68282"),
+                xlim = c(-3,3),
+                ylim = c(0,300),
+                colAlpha = 1,
+                maxoverlapsConnectors = 100,
+                selectLab = top10)
+                
+#EnhancedVolcano plot generated for Fig 4.15B!------------------
+
+SGMarkersLitReview<- read.csv("/Volumes/Macintosh HD/Users/anna/Desktop/R_temp/SGvsEpidermal_BasedonSeqSample.csv", row.names = 1)
+SGMarkersUnknown <- subset(SGMarkersLitReview, Literature == "N")
+SGMarkersKnown <- subset(SGMarkersLitReview, Literature == "Y")
+
+SGMarkersUnknownnamestop <- SGMarkersUnknownnames[1:40]
+
+keyvals <- ifelse(
+  SGMarkersLitReview$Literature == "Y", '#00BFC4',
+      ifelse(SGMarkersLitReview$Literature == "N", '#F68282',
+         ifelse(SGMarkersLitReview$Literature == "X", 'white',
+         'white')))
+keyvals[is.na(keyvals)] <- 'white'
+names(keyvals)[keyvals == '#F68282'] <- 'Not yet implicated'
+names(keyvals)[keyvals == 'white'] <- 'Downregulated'
+names(keyvals)[keyvals == '#00BFC4'] <- 'Implicated'
+
+EnhancedVolcano(SGMarkersLitReview,
+                lab = rownames(SGMarkersLitReview),
+                x = "avg_log2FC", 
+                y = "p_val_adj", 
+                xlab = bquote(~Log[2]~ 'fold change'),
+                pCutoff = 0,
+                FCcutoff = 0,
+                drawConnectors = T,
+                widthConnectors = 0.5,
+                labSize = 5,
+                xlim = c(0.2,0.65),
+                ylim = c(0,200),
+                colAlpha = 1,
+                maxoverlapsConnectors = 100,
+                selectLab = SGMarkersUnknownnames,
+                colCustom = keyvals)
+
+EnhancedVolcano(SGMarkersUnknown,
+                lab = rownames(SGMarkersUnknown),
+                x = "avg_log2FC", 
+                y = "p_val_adj", 
+                xlab = bquote(~Log[2]~ 'fold change'),
+                pCutoff = 10e-1,
+                FCcutoff = 0.01,
+                drawConnectors = T,
+                widthConnectors = 0.5,
+                labSize = 4,
+                xlim = c(0.25,0.7),
+                ylim = c(0,200),
+                colAlpha = 1,
+                maxoverlapsConnectors = 100,
+                selectLab = SGMarkersUnknownnames)
+
+#EnhancedVolcano plot generated for Fig 4.16!------------------
