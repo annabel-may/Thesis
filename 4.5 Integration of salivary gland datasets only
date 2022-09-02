@@ -134,7 +134,28 @@ DimPlot(SGData)
 
 #DimPlot(SGData) generates UMAP in Figure 4.17C!-----------------
 
-write.csv(res0.4keep, "/Volumes/Seatgate Portable Media/scRNAseq2021/Seurat/Combined/SGCellonlyOffical/cellstokeepforSGonly.csv")
+SGCellsonly@active.assay <- "SCT"
+SGData <- PrepSCTFindMarkers(SGData)
+FindAllMarkers(SGData)
+
+#Finds marker genes for all clusters! Used in Chapters 5 &6!--------------------------
+
+#To change resolution change resolution parameter in this code.
+SGCellsonly@active.assay <- "integrated"
+SGData <- FindClusters(SGData, resolution = 0.7)
+DimPlot(SGData)
+
+SGCellsonly@active.assay <- "SCT"
+SGData <- PrepSCTFindMarkers(SGData)
+FindAllMarkers(SGData)
+
+#Finds marker genes for all clusters! Used in Chapters 5 &6!--------------------------
+
+#Save which cells are in the dataset easier to load in specific list of cells 
+
+write.csv(res0.4keep, "......")
+
+#Compare which cells came from which sample
 
 DimPlot(Allcells, split.by = "orig.ident")
 
